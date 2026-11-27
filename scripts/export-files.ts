@@ -4,15 +4,12 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { BSON } from 'mongodb'
 import mysql from 'mysql2/promise'
 import neo4j from 'neo4j-driver'
 import { config } from '../server/infrastructure/config'
-import { closeMongo, mongoDb } from '../server/infrastructure/mongo/client'
-import { mongoSchema } from '../server/infrastructure/mongo/schema'
 import { closeNeo4j, readCypher } from '../server/infrastructure/neo4j/client'
 import { neo4jSchemaStatements } from '../server/infrastructure/neo4j/schema'
-import { files, MONGO_COLLECTIONS, type DatasetInfo } from './lib/files'
+import { files, type DatasetInfo } from './lib/files'
 
 const SQL_ROWS = 500
 const GRAPH_ROWS = 500
@@ -29,33 +26,20 @@ function chunks<T>(rows: T[], size: number): T[][] {
 
 // ---------- MongoDB ----------
 
-function mongoSetupScript(): string {
-  const json = (value: unknown) => JSON.stringify(value, null, 2)
-  return `// Creates the GraphMart collections and indexes. Paste it into the Compass shell, or run
-//   mongosh --file database/mongodb/setup.js
-// then import each .json file in this folder into the collection with the same name.
-// Written by \`bun run db:export\`; edit server/infrastructure/mongo/schema.ts instead.
-const schema = ${json(mongoSchema)}
-const target = db.getSiblingDB('graphmart')
-const existing = target.getCollectionNames()
-const create = (name, options) => existing.includes(name) || target.createCollection(name, options)
-for (const [name, rules] of Object.entries(schema.validators)) create(name, { validator: { $jsonSchema: rules } })
-for (const [name, options] of Object.entries(schema.timeSeries)) create(name, options)
-for (const name of schema.plain) create(name)
-for (const [name, list] of Object.entries(schema.indexes)) {
-  for (const { key, ...options } of list) target.getCollection(name).createIndex(key, options)
-}
-print('GraphMart collections and indexes are ready.')
-`
-}
-
-async function exportMongo(): Promise<void> {
-  save(files.mongoSetup, mongoSetupScript())
-  for (const name of MONGO_COLLECTIONS) {
-    const documents = await mongoDb().collection(name).find().sort({ _id: 1 }).toArray()
-    const lines = documents.map((document) => BSON.EJSON.stringify(document, { relaxed: true }))
-    save(files.mongoCollection(name), `[\n${lines.join(',\n')}\n]\n`)
-  }
+/** Needs MongoDB Database Tools. Set MONGODUMP to the program if it is not on the PATH. */
+function exportMongo(): void {
+  const mongodump = process.env.MONGODUMP ?? Bun.which('mongodump')
+  if (!mongodump) throw new Error('mongodump not found. Install MongoDB Database Tools or set MONGODUMP.')
+  mkdirSync(dirname(files.mongo), { recursive: true })
+  const result = Bun.spawnSync([
+    mongodump,
+    `--uri=${config.MONGO_URI}`,
+    `--db=${config.MONGO_DB}`,
+    `--archive=${files.mongo}`,
+    '--gzip',
+  ])
+  if (!result.success) throw new Error(`mongodump failed:\n${result.stderr.toString()}`)
+  console.log(`  ${files.mongo}`)
 }
 
 // ---------- MySQL ----------
@@ -188,11 +172,11 @@ async function exportNeo4j(): Promise<void> {
 try {
   const seed = JSON.parse(readFileSync(new URL('../.data/seed-info.json', import.meta.url), 'utf8')) as DatasetInfo
   console.log(`Exporting the ${seed.scale} dataset`)
-  await exportMongo()
+  exportMongo()
   await exportMysql()
   await exportNeo4j()
   const info: DatasetInfo = { scale: seed.scale, generatedAt: seed.generatedAt, counts: seed.counts }
   save(files.info, `${JSON.stringify(info, null, 2)}\n`)
 } finally {
-  await Promise.allSettled([closeMongo(), closeNeo4j()])
+  await closeNeo4j()
 }

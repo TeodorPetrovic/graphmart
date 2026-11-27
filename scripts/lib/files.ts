@@ -6,21 +6,10 @@ const root = resolve(import.meta.dir, '../../database')
 export const files = {
   info: resolve(root, 'dataset.json'),
   mysql: resolve(root, 'mysql/graphmart.sql'),
-  mongoSetup: resolve(root, 'mongodb/setup.js'),
-  mongoCollection: (name: string) => resolve(root, `mongodb/${name}.json`),
+  /** A gzipped `mongodump` archive of the whole database. */
+  mongo: resolve(root, 'mongodb/graphmart.agz'),
   neo4j: resolve(root, 'neo4j/graphmart.cypher'),
 }
-
-export const MONGO_COLLECTIONS = [
-  'users',
-  'categories',
-  'products',
-  'orders',
-  'reviews',
-  'product_views',
-  'warehouses',
-  'counters',
-]
 
 export interface DatasetInfo {
   scale: string

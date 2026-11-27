@@ -43,7 +43,7 @@ If your MongoDB asks for a login, put it in `.env`:
 
 `bun run bench` measures all 17 comparisons on whatever is loaded and writes
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md). The [database folder](database/README.md) explains how to
-load the files by hand with Compass, Workbench and Neo4j Desktop.
+load the files by hand with Studio 3T, Workbench and Neo4j Desktop.
 
 ## Transactions need a replica set
 

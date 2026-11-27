@@ -4,18 +4,21 @@
 
 | Database | Files                                                      |
 | -------- | ---------------------------------------------------------- |
-| MongoDB  | `mongodb/setup.js`, then the eight `.json` files beside it |
+| MongoDB  | `mongodb/graphmart.agz`                                    |
 | Neo4j    | `neo4j/graphmart.cypher`                                   |
 | MySQL    | `mysql/graphmart.sql`                                      |
 
-## MongoDB (Compass)
+## MongoDB (Studio 3T)
 
-1. Open the shell at the bottom of Compass, paste all of `mongodb/setup.js` and press Enter. It
-   creates the `graphmart` database, its collections and indexes.
-2. For each `.json` file, open the collection with the same name in `graphmart`, choose
-   **Add data**, then **Import JSON or CSV file**, and pick the file.
+1. In Studio 3T open **Import**, choose **BSON - mongodump archive** and click **Configure**.
+2. Pick `mongodb/graphmart.agz` and your connection, then run the import. It creates the
+   `graphmart` database with its data, indexes and validators.
 
-Do step 1 first: `product_views` has to be created as a time series collection.
+Studio 3T runs `mongorestore` for this. If it asks for it, install
+[MongoDB Database Tools](https://www.mongodb.com/try/download/database-tools) and set the path to
+`mongorestore.exe` in **Preferences**, **External tools**, **MongoDB tools**.
+
+The same file from a terminal: `mongorestore --gzip --archive=graphmart.agz`
 
 ## Neo4j (Neo4j Desktop)
 
@@ -40,4 +43,4 @@ root.
 With the databases set in `.env`, `bun run db:import` loads these files for you.
 
 To write the files again from your databases: `bun run seed --scale small --replace`, then
-`bun run db:export`.
+`bun run db:export` (needs `mongodump` from the same tools).

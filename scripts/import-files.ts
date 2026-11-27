@@ -3,27 +3,25 @@
  * Options: --replace (delete what is already there), --only mongo,mysql,neo4j
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { BSON, type Document } from 'mongodb'
-import { closeMongo, mongoDb } from '../server/infrastructure/mongo/client'
-import { ensureMongoSchema } from '../server/infrastructure/mongo/schema'
+import { closeMongo } from '../server/infrastructure/mongo/client'
 import { closeMysql, mysqlPool } from '../server/infrastructure/mysql/client'
 import { closeNeo4j, writeCypher } from '../server/infrastructure/neo4j/client'
-import { files, MONGO_COLLECTIONS, statements, type DatasetInfo } from './lib/files'
+import type { ScaleName } from '../shared/utils/demo'
+import { files, statements, type DatasetInfo } from './lib/files'
 import { assertSafeToLoad, ENGINES, parseEngines, type Engine } from './lib/targets'
+import { generateDataset } from './seed/generate'
+import { loadMongo } from './seed/loaders/mongo'
 import { clearGraph } from './seed/loaders/neo4j'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
+/**
+ * The archive in database/mongodb is for mongorestore and Studio 3T. The generator that
+ * produced it always gives the same data, so this command needs no extra tools.
+ */
+let dataset: DatasetInfo['scale'] = 'small'
 async function importMongo(): Promise<void> {
-  const db = mongoDb()
-  await db.dropDatabase()
-  await ensureMongoSchema(db)
-  for (const name of MONGO_COLLECTIONS) {
-    const documents = BSON.EJSON.parse(read(files.mongoCollection(name))) as Document[]
-    for (let offset = 0; offset < documents.length; offset += 1000) {
-      await db.collection(name).insertMany(documents.slice(offset, offset + 1000))
-    }
-  }
+  await loadMongo(generateDataset(dataset as ScaleName))
 }
 
 async function importMysql(): Promise<void> {
@@ -64,6 +62,7 @@ try {
   await assertSafeToLoad(engines, replace)
   const info = JSON.parse(read(files.info)) as DatasetInfo
   console.log(`Importing the ${info.scale} dataset`)
+  dataset = info.scale
   for (const engine of engines) {
     const started = performance.now()
     await IMPORTERS[engine].run()
