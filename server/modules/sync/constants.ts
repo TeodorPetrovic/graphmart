@@ -1,0 +1,2 @@
+export const MAX_OUTBOX_ATTEMPTS = 5
+export const OUTBOX_POLL_INTERVAL_MS = 5000

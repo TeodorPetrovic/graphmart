@@ -1,0 +1,7 @@
+.nuxt
+.output
+.data
+.tools
+bun.lock
+docs
+

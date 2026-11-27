@@ -1,0 +1,39 @@
+{
+  "name": "graphmart",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --bun nuxt dev",
+    "build": "bun --bun nuxt build",
+    "start": "NITRO_BUN_IDLE_TIMEOUT=255 bun .output/server/index.mjs",
+    "postinstall": "nuxt prepare",
+    "db:setup": "bun scripts/db.ts setup",
+    "db:up": "bun scripts/db.ts up",
+    "db:down": "bun scripts/db.ts down",
+    "db:status": "bun scripts/db.ts status",
+    "seed": "bun scripts/seed.ts",
+    "bench": "bun scripts/benchmark.ts",
+    "examples": "bun scripts/check-examples.ts",
+    "typecheck": "bun --bun nuxt typecheck",
+    "test": "bun test tests",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@iconify-json/lucide": "^1.2.160",
+    "@nuxt/ui": "4.13.1",
+    "cytoscape": "3.35.0",
+    "mongodb": "7.9.1",
+    "mysql2": "3.24.6",
+    "neo4j-driver": "6.3.2",
+    "nuxt": "4.7.0",
+    "tailwindcss": "4.3.5",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.5",
+    "@types/cytoscape": "3.31.0",
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "vue-tsc": "3.3.14"
+  }
+}
