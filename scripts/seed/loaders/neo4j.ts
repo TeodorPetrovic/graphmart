@@ -6,11 +6,10 @@ import { rebuildProjections } from '../../../server/modules/sync/graph-loader'
 
 const batchSize = 1_000
 
-export async function loadNeo4j(data: Dataset): Promise<void> {
-  await ensureNeo4jSchema()
+/** Deletes every node and relationship in the configured database. */
+export async function clearGraph(): Promise<void> {
   const session = neo4jDriver().session({ database: config.NEO4J_DATABASE })
   try {
-    // The seed owns the whole demo graph, so remove every node before rebuilding its projections.
     await session.run(`
       MATCH (node)
       CALL { WITH node DETACH DELETE node } IN TRANSACTIONS OF 10000 ROWS
@@ -18,8 +17,12 @@ export async function loadNeo4j(data: Dataset): Promise<void> {
   } finally {
     await session.close()
   }
+}
 
+export async function loadNeo4j(data: Dataset): Promise<void> {
   await ensureNeo4jSchema()
+  // The seed owns the whole demo graph, so remove every node before rebuilding it.
+  await clearGraph()
   await rebuildProjections()
   await writeFollows(data)
   await writeRoutes(data)

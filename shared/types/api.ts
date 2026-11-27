@@ -182,7 +182,14 @@ export interface SyncEventView {
   error: string | null
 }
 export type SyncStatusResponse = Traced<{
-  projector: { running: boolean; startedAt: string | null; lastEventAt: string | null; lastError: string | null }
+  projector: {
+    running: boolean
+    /** "polling" on a single MongoDB server, which has no change streams. */
+    mode: 'change-stream' | 'polling'
+    startedAt: string | null
+    lastEventAt: string | null
+    lastError: string | null
+  }
   counts: { pending: number; processed: number; failed: number }
   recent: SyncEventView[]
 }>

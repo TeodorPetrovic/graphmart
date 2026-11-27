@@ -8,14 +8,16 @@ import { generateDataset, type Dataset } from './seed/generate'
 import { loadMongo } from './seed/loaders/mongo'
 import { loadMysql } from './seed/loaders/mysql'
 import { loadNeo4j } from './seed/loaders/neo4j'
+import { assertSafeToLoad, ENGINES, parseEngines, type Engine } from './lib/targets'
 
 const seedInfoPath = resolve(import.meta.dir, '../.data/seed-info.json')
 const seedStartedAt = performance.now()
 const timings: Record<string, number> = {}
 
-function parseArgs(): { scale: ScaleName; engines: Set<string> } {
+function parseArgs(): { scale: ScaleName; engines: Set<Engine>; replace: boolean } {
   let scale: ScaleName = 'medium'
-  const engines = new Set(['mongo', 'mysql', 'neo4j'])
+  let engines = new Set<Engine>(ENGINES)
+  let replace = false
 
   for (let index = 2; index < process.argv.length; index += 1) {
     const argument = process.argv[index]!
@@ -28,19 +30,17 @@ function parseArgs(): { scale: ScaleName; engines: Set<string> } {
       continue
     }
     if (argument === '--only') {
-      const engineList = process.argv[++index]
-      if (!engineList) throw new Error('--only requires a comma separated engine list')
-      engines.clear()
-      for (const engine of engineList.split(',')) {
-        if (!['mongo', 'mysql', 'neo4j'].includes(engine)) throw new Error(`Unknown engine: ${engine}`)
-        engines.add(engine)
-      }
+      engines = parseEngines(process.argv[++index] ?? '')
+      continue
+    }
+    if (argument === '--replace') {
+      replace = true
       continue
     }
     throw new Error(`Unknown argument: ${argument}`)
   }
 
-  return { scale, engines }
+  return { scale, engines, replace }
 }
 
 async function timed<T>(step: string, work: () => Promise<T>): Promise<T> {
@@ -53,9 +53,10 @@ async function timed<T>(step: string, work: () => Promise<T>): Promise<T> {
 }
 
 async function main(): Promise<void> {
+  const { scale, engines, replace } = parseArgs()
+  await assertSafeToLoad(engines, replace)
   if (existsSync(seedInfoPath)) rmSync(seedInfoPath)
   mkdirSync(resolve(import.meta.dir, '../.data'), { recursive: true })
-  const { scale, engines } = parseArgs()
   const dataset = await timed('Generate dataset', async () => generateDataset(scale))
 
   if (engines.has('mongo')) await timed('MongoDB load', () => loadMongo(dataset))
@@ -86,6 +87,9 @@ function writeSeedInfo(scale: ScaleName, dataset: Dataset): void {
 
 try {
   await main()
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error)
+  process.exitCode = 1
 } finally {
   await Promise.allSettled([closeMongo(), closeMysql(), closeNeo4j()])
 }

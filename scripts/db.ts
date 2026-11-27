@@ -1,13 +1,15 @@
 /**
- * Runs project-local MongoDB, MySQL and Neo4j instances without Docker.
- * Data lives in `.data/`, ports differ from the defaults, and nothing touches
- * database servers that are already installed as system services.
+ * Optional: runs separate MongoDB, MySQL and Neo4j copies for this project, with the settings
+ * in `.env.private.example`. Data lives in `.data/`, ports differ from the defaults, and nothing
+ * touches database servers that are already installed as services. To use your own servers
+ * instead, set them in `.env` and ignore this script.
  *
  *   bun run db:setup   initialise data directories (once)
  *   bun run db:up      start all three and wait until they accept connections
  *   bun run db:down    stop them
  *   bun run db:status
  */
+import './private-env'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'

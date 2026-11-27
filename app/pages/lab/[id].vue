@@ -2,9 +2,9 @@
 import type {
   EngineId,
   ExplainResponse,
+  RunScenarioResponse,
   ScenarioInfo,
   ScenarioListResponse,
-  RunScenarioResponse,
 } from '#shared/types/api'
 
 const route = useRoute()
@@ -20,14 +20,21 @@ const runError = ref('')
 const result = ref<RunScenarioResponse | null>(null)
 const selectedQueryEngine = ref<EngineId>('mysql')
 const explain = ref<ExplainResponse | null>(null)
-const explaining = ref<EngineId | null>(null)
+const explaining = ref(false)
 const explainError = ref('')
-const availableScenarios = computed(() =>
+
+const ordered = computed(() =>
   [...(scenarioList.value?.scenarios ?? [])].sort((a, b) => a.lecture - b.lecture || a.order - b.order),
 )
-const currentIndex = computed(() => availableScenarios.value.findIndex((item) => item.id === scenarioId.value))
-const previousScenario = computed(() => availableScenarios.value[currentIndex.value - 1])
-const nextScenario = computed(() => availableScenarios.value[currentIndex.value + 1])
+const currentIndex = computed(() => ordered.value.findIndex((item) => item.id === scenarioId.value))
+const previous = computed(() => ordered.value[currentIndex.value - 1])
+const next = computed(() => ordered.value[currentIndex.value + 1])
+const otherEngines = computed(() =>
+  (scenario.value?.engines ?? [])
+    .filter((item) => item.engine !== 'mysql')
+    .map((item) => ENGINE_NAMES[item.engine])
+    .join(' and '),
+)
 
 watch(
   scenario,
@@ -42,10 +49,11 @@ watch(
   },
   { immediate: true },
 )
+watch(selectedQueryEngine, () => (explain.value = null))
 
-function setParam(name: string, rawValue: string) {
+function setParam(name: string, rawValue: string | number) {
   const spec = scenario.value?.params.find((item) => item.name === name)
-  params[name] = spec?.type === 'number' ? Number(rawValue) : rawValue
+  params[name] = spec?.type === 'number' ? Number(rawValue) : String(rawValue)
 }
 function toggleEngine(engine: EngineId) {
   selectedEngines.value = selectedEngines.value.includes(engine)
@@ -62,114 +70,88 @@ async function runScenario() {
       body: { params: { ...params }, iterations: iterations.value, engines: selectedEngines.value },
     })
   } catch (cause) {
-    runError.value = apiErrorMessage(cause, 'The scenario could not be run.')
+    runError.value = apiErrorMessage(cause, 'The comparison could not be run.')
   } finally {
     running.value = false
   }
 }
-async function explainEngine(engine: EngineId) {
-  explaining.value = engine
+async function explainQuery() {
+  explaining.value = true
   explainError.value = ''
   try {
     explain.value = await $fetch<ExplainResponse>(`/api/lab/scenarios/${scenarioId.value}/explain`, {
       method: 'POST',
-      body: { engine, params: { ...params } },
+      body: { engine: selectedQueryEngine.value, params: { ...params } },
     })
   } catch (cause) {
-    explainError.value = apiErrorMessage(cause, 'Could not explain this query.')
+    explainError.value = apiErrorMessage(cause, 'Could not get the query plan.')
   } finally {
-    explaining.value = null
+    explaining.value = false
   }
 }
 </script>
 
 <template>
-  <main class="space-y-6 p-6 lg:p-8">
-    <header>
-      <NuxtLink to="/lab" class="text-sm font-semibold text-primary hover:underline">← All scenarios</NuxtLink>
-      <h1 class="mt-2 text-3xl font-bold">{{ scenario?.title ?? 'Lab scenario' }}</h1>
-      <p class="mt-1 text-lg text-muted">{{ scenario?.question }}</p>
-    </header>
-    <LoadState :status="status" :error="error">
-      <template v-if="scenario">
-        <section class="grid gap-4 md:grid-cols-2">
-          <article class="rounded-xl border border-default p-5">
-            <h2 class="text-xl font-semibold">Why it hurts in tables</h2>
-            <p class="mt-2 leading-relaxed">{{ scenario.relationalPain }}</p>
-          </article>
-          <article class="rounded-xl border border-default p-5">
-            <h2 class="text-xl font-semibold">Why this model helps</h2>
-            <p class="mt-2 leading-relaxed">{{ scenario.nosqlWin }}</p>
-          </article>
-        </section>
-        <section class="rounded-xl border border-default p-5">
-          <h2 class="text-xl font-semibold">Talking points</h2>
-          <ul class="mt-3 list-inside list-disc space-y-2">
-            <li v-for="point in scenario.talkingPoints" :key="point">{{ point }}</li>
-          </ul>
-        </section>
-        <section class="space-y-4 rounded-xl border border-default p-5">
-          <h2 class="text-xl font-semibold">Run this question</h2>
-          <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <UFormField v-for="param in scenario.params" :key="param.name" :label="param.label"
-              ><UInput
+  <LoadState :status="status" :error="error">
+    <div v-if="scenario" class="space-y-8">
+      <div class="space-y-1">
+        <ULink to="/lab" class="text-sm underline">All comparisons</ULink>
+        <h2 class="text-2xl font-semibold">{{ scenario.title }}</h2>
+        <p>{{ scenario.question }}</p>
+      </div>
+      <div class="grid gap-6 md:grid-cols-2">
+        <PageSection title="With MySQL tables" :note="scenario.relationalPain" />
+        <PageSection :title="`With ${otherEngines || 'an index'}`" :note="scenario.nosqlWin" />
+      </div>
+      <PageSection title="Points to make">
+        <ul class="list-inside list-disc space-y-1 text-sm">
+          <li v-for="point in scenario.talkingPoints" :key="point">{{ point }}</li>
+        </ul>
+      </PageSection>
+
+      <PageSection title="Run it">
+        <form class="space-y-3" @submit.prevent="runScenario">
+          <div class="flex flex-wrap gap-3">
+            <UFormField v-for="param in scenario.params" :key="param.name" :label="param.label">
+              <UInput
                 :model-value="String(params[param.name] ?? param.default)"
                 :type="param.type === 'number' ? 'number' : 'text'"
                 :min="param.min"
                 :max="param.max"
-                @update:model-value="setParam(param.name, $event)" /></UFormField
-            ><UFormField label="Iterations"
-              ><UInput v-model.number="iterations" type="number" min="1" max="30"
-            /></UFormField>
+                @update:model-value="setParam(param.name, $event)"
+              />
+            </UFormField>
+            <UFormField label="Runs">
+              <UInput v-model.number="iterations" type="number" min="1" max="30" class="w-20" />
+            </UFormField>
           </div>
-          <div>
-            <p class="mb-2 font-semibold">Compare engines</p>
-            <div class="flex flex-wrap gap-2">
-              <UButton
-                v-for="{ engine } in scenario.engines"
-                :key="engine"
-                color="neutral"
-                :variant="selectedEngines.includes(engine) ? 'soft' : 'ghost'"
-                :class="selectedEngines.includes(engine) ? 'ring-2 ring-primary' : 'opacity-50'"
-                :aria-pressed="selectedEngines.includes(engine)"
-                @click="toggleEngine(engine)"
-                ><EngineBadge :engine="engine"
-              /></UButton>
-            </div>
+          <div class="flex flex-wrap items-center gap-4">
+            <UCheckbox
+              v-for="{ engine } in scenario.engines"
+              :key="engine"
+              :model-value="selectedEngines.includes(engine)"
+              :label="ENGINE_NAMES[engine]"
+              @update:model-value="toggleEngine(engine)"
+            />
+            <UButton type="submit" :loading="running" :disabled="running || !selectedEngines.length">Run</UButton>
           </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <UButton :loading="running" :disabled="running || selectedEngines.length === 0" @click="runScenario">{{
-              running ? 'Running…' : 'Run scenario'
-            }}</UButton><span v-if="running" class="text-sm text-muted" role="status"
-              >Queries are running. Long database queries may time out.</span
-            >
-          </div>
-          <UAlert v-if="runError" color="error" title="Run failed" :description="runError" />
-        </section>
-        <LabScenarioResults v-if="result" :result="result" />
-        <LabScenarioQueryPanel
-          :scenario="scenario"
-          :selected-engine="selectedQueryEngine"
-          :explaining="explaining"
-          :explain="explain"
-          :error-message="explainError"
-          @update:selected-engine="selectedQueryEngine = $event"
-          @explain="explainEngine"
-        />
-        <nav class="flex justify-between border-t border-default pt-4" aria-label="Scenario navigation">
-          <NuxtLink
-            v-if="previousScenario"
-            :to="`/lab/${previousScenario.id}`"
-            class="font-semibold text-primary hover:underline"
-            >← {{ previousScenario.title }}</NuxtLink
-          ><span v-else /><NuxtLink
-            v-if="nextScenario"
-            :to="`/lab/${nextScenario.id}`"
-            class="font-semibold text-primary hover:underline"
-            >{{ nextScenario.title }} →</NuxtLink
-          >
-        </nav>
-      </template>
-    </LoadState>
-  </main>
+        </form>
+        <UAlert v-if="runError" color="error" variant="subtle" :description="runError" />
+      </PageSection>
+      <LabScenarioResults v-if="result" :result="result" />
+      <LabScenarioQueryPanel
+        v-model:engine="selectedQueryEngine"
+        :scenario="scenario"
+        :explaining="explaining"
+        :explain="explain"
+        :error-message="explainError"
+        @explain="explainQuery"
+      />
+      <nav class="flex justify-between gap-4 border-t border-default pt-3 text-sm" aria-label="Other comparisons">
+        <ULink v-if="previous" :to="`/lab/${previous.id}`" class="underline">Previous: {{ previous.title }}</ULink>
+        <span v-else />
+        <ULink v-if="next" :to="`/lab/${next.id}`" class="underline">Next: {{ next.title }}</ULink>
+      </nav>
+    </div>
+  </LoadState>
 </template>

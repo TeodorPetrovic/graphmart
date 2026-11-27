@@ -48,7 +48,7 @@ export const monthlyRevenue: Scenario = {
   nosqlWin:
     'The aggregation pipeline keeps grouping and the running window together, though MySQL may be faster for this workload.',
   talkingPoints: [
-    'Both engines support window calculations; data modelling does not remove aggregation work.',
+    'Both engines support window calculations. Data modelling still requires aggregation work.',
     'Cancelled orders are excluded before revenue is grouped.',
     'The month key is sorted so cumulative totals are deterministic.',
   ],

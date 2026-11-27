@@ -1,7 +1,8 @@
-import { ObjectId, type ClientSession } from 'mongodb'
+import { ObjectId } from 'mongodb'
 import type { CreateReviewRequest } from '../../../shared/types/api'
 import type { OutboxDoc, ReviewDoc } from '../../../shared/types/domain'
-import { collections, mongoClient } from '../../infrastructure/mongo/client'
+import { writeTogether, type WriteScope } from '../../infrastructure/mongo/atomic'
+import { collections } from '../../infrastructure/mongo/client'
 import { shell, type Tracer } from '../../infrastructure/trace'
 
 type CommerceCollections = ReturnType<typeof collections>
@@ -15,21 +16,15 @@ export class ReviewFailure extends Error {
   }
 }
 
-function ratingUpdatePipeline(rating: number) {
-  return [
-    {
-      $set: {
-        'ratingSummary.count': { $add: ['$ratingSummary.count', 1] },
-        'ratingSummary.sum': { $add: ['$ratingSummary.sum', rating] },
-        'ratingSummary.avg': {
-          $divide: [{ $add: ['$ratingSummary.sum', rating] }, { $add: ['$ratingSummary.count', 1] }],
-        },
-      },
-    },
-  ]
+/** Adds one rating to a product's summary, or removes it again when `direction` is -1. */
+function ratingUpdatePipeline(rating: number, direction: 1 | -1 = 1) {
+  const count = { $add: ['$ratingSummary.count', direction] }
+  const sum = { $add: ['$ratingSummary.sum', direction * rating] }
+  const average = { $cond: [{ $gt: [count, 0] }, { $divide: [sum, { $max: [count, 1] }] }, 0] }
+  return [{ $set: { 'ratingSummary.count': count, 'ratingSummary.sum': sum, 'ratingSummary.avg': average } }]
 }
 
-async function nextReviewId(session: ClientSession, db: CommerceCollections, tracer: Tracer): Promise<number> {
+async function nextReviewId(session: WriteScope['session'], db: CommerceCollections, tracer: Tracer): Promise<number> {
   const filter = { _id: 'reviews' }
   const update = { $inc: { seq: 1 } }
   return tracer.run('mongo', 'Allocate review id', shell('counters', 'findOneAndUpdate', filter, update), async () => {
@@ -45,13 +40,14 @@ async function nextReviewId(session: ClientSession, db: CommerceCollections, tra
 async function saveReview(
   review: ReviewDoc,
   eventId: ObjectId,
-  session: ClientSession,
+  { session, onFailure }: WriteScope,
   db: CommerceCollections,
   tracer: Tracer,
 ): Promise<void> {
   await tracer.run('mongo', 'Insert review', shell('reviews', 'insertOne', review), () =>
     db.reviews.insertOne(review, { session }),
   )
+  onFailure(() => db.reviews.deleteOne({ _id: review._id }))
   const summaryFilter = { _id: review.productId }
   const summaryPipeline = ratingUpdatePipeline(review.rating)
   await tracer.run(
@@ -60,6 +56,7 @@ async function saveReview(
     shell('products', 'updateOne', summaryFilter, summaryPipeline),
     () => db.products.updateOne(summaryFilter, summaryPipeline, { session }),
   )
+  onFailure(() => db.products.updateOne(summaryFilter, ratingUpdatePipeline(review.rating, -1)))
   const outboxEvent = {
     _id: eventId,
     type: 'review.created',
@@ -83,14 +80,15 @@ async function saveReview(
   )
 }
 
-async function createReviewInTransaction(
+async function addReview(
   productId: number,
   input: CreateReviewRequest,
   eventId: ObjectId,
-  session: ClientSession,
+  scope: WriteScope,
   db: CommerceCollections,
   tracer: Tracer,
 ): Promise<ReviewDoc> {
+  const { session } = scope
   const userFilter = { _id: input.userId }
   const productFilter = { _id: productId }
   const user = await tracer.run('mongo', 'Check review user', shell('users', 'findOne', userFilter), () =>
@@ -112,24 +110,14 @@ async function createReviewInTransaction(
     helpfulVotes: 0,
     createdAt: new Date(),
   }
-  await saveReview(review, eventId, session, db, tracer)
+  await saveReview(review, eventId, scope, db, tracer)
   return review
 }
 
 export async function createReview(productId: number, input: CreateReviewRequest, tracer: Tracer) {
   const db = collections()
-  const session = mongoClient().startSession()
   const eventId = new ObjectId()
-  let review: ReviewDoc | undefined
-  try {
-    // The review, rating summary, counter, and outbox event commit as one document transaction.
-    review = await session.withTransaction(() =>
-      createReviewInTransaction(productId, input, eventId, session, db, tracer),
-    )
-  } finally {
-    await session.endSession()
-  }
-  if (!review) throw new Error('Review transaction completed without a review')
+  const review = await writeTogether((scope) => addReview(productId, input, eventId, scope, db, tracer))
   return {
     review: {
       id: review._id,

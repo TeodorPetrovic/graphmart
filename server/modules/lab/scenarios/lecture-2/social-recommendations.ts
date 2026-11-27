@@ -62,12 +62,12 @@ export const socialRecommendations: Scenario = {
   lecture: 2,
   order: 12,
   title: 'Social recommendations',
-  question: 'Which products bought by my nearby network match categories I buy from, but that I have not bought?',
+  question: 'Which products from categories I buy have buyers in my network and are absent from my purchases?',
   relationalPain: 'The recursive user frontier feeds several order, item and category joins plus an anti-join.',
   nosqlWin:
     'Cypher moves from the user through bounded FOLLOWS and PURCHASED adjacency, then checks category membership.',
   talkingPoints: [
-    'The score is distinct network buyers, not order count.',
+    'The score counts distinct buyers in the network. Repeat orders do not increase it.',
     'COUNT DISTINCT prevents multiple paths from inflating a buyer’s contribution.',
   ],
   params: [

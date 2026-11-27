@@ -1,120 +1,64 @@
 <script setup lang="ts">
-import type { BenchmarkReportResponse, ScenarioListResponse } from '#shared/types/api'
+import type { BenchmarkReportResponse, EngineId, ScenarioInfo, ScenarioListResponse } from '#shared/types/api'
 
+const ENGINES: EngineId[] = ['mysql', 'mongo', 'neo4j']
 const { data: list, status, error } = useFetch<ScenarioListResponse>('/api/lab/scenarios')
-const {
-  data: reportData,
-  status: reportStatus,
-  error: reportError,
-} = useFetch<BenchmarkReportResponse>('/api/lab/report')
-const scenarios = computed(() => list.value?.scenarios ?? [])
-const lectureOne = computed(() =>
-  scenarios.value.filter((scenario) => scenario.lecture === 1).sort((a, b) => a.order - b.order),
+const { data: saved } = useFetch<BenchmarkReportResponse>('/api/lab/report')
+const report = computed(() => saved.value?.report)
+const lectures = computed(() =>
+  ([1, 2] as const).map((lecture) => ({
+    lecture,
+    scenarios: (list.value?.scenarios ?? [])
+      .filter((scenario) => scenario.lecture === lecture)
+      .sort((a, b) => a.order - b.order),
+  })),
 )
-const lectureTwo = computed(() =>
-  scenarios.value.filter((scenario) => scenario.lecture === 2).sort((a, b) => a.order - b.order),
-)
-const reportResults = computed(() => reportData.value?.report?.results ?? [])
-const maxRatio = computed(() =>
-  Math.max(
-    1,
-    ...reportResults.value.flatMap((scenario) => {
-      const times = scenario.results
-        .filter((result) => result.ok && result.medianMs !== null)
-        .flatMap((result) => (result.medianMs === null ? [] : [result.medianMs]))
-      const fastest = Math.min(...times)
-      return times.map((time) => time / fastest)
-    }),
-  ),
-)
-function barWidth(time: number, fastest: number) {
-  return `${Math.max(4, (Math.log10(time / fastest + 1) / Math.log10(maxRatio.value + 1)) * 100)}%`
+const columns = [
+  { key: 'title', label: 'Question' },
+  ...ENGINES.map((engine) => ({ key: engine, label: ENGINE_NAMES[engine], align: 'right' as const })),
+]
+
+function medians(scenarioId: string) {
+  const results = report.value?.results.find((item) => item.scenarioId === scenarioId)?.results ?? []
+  return new Map(results.flatMap((r) => (r.ok && r.medianMs !== null ? [[r.engine, r.medianMs] as const] : [])))
 }
+/** One row per scenario: its title and the saved median time of each database. */
+const rows = (scenarios: ScenarioInfo[]) =>
+  scenarios.map((scenario) => {
+    const times = medians(scenario.id)
+    return {
+      id: scenario.id,
+      title: scenario.title,
+      engines: scenario.engines.map((item) => item.engine),
+      times,
+      fastest: Math.min(...times.values()),
+    }
+  })
 </script>
 
 <template>
-  <main class="space-y-8 p-6 lg:p-8">
-    <PageHeader
-      title="Performance lab"
-      description="Run the same questions against relational, document, and graph approaches."
-    />
-    <section class="space-y-4">
-      <div>
-        <h2 class="text-2xl font-semibold">Latest benchmark</h2>
-        <p class="text-sm text-muted">
-          Stored run summary. Ratios are shown relative to the fastest successful engine per scenario.
-        </p>
-      </div>
-      <LoadState :status="reportStatus" :error="reportError"
-        ><div v-if="reportData?.report" class="space-y-4 rounded-xl border border-default p-4">
-          <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted">
-            <span>{{ formatTimestamp(reportData.report.generatedAt) }}</span><span
-              >Scale: {{ reportData.report.scale }}</span
-            ><span>{{ reportData.report.iterations }} iterations</span><span>{{ reportData.report.machine }}</span>
-          </div>
-          <p v-if="maxRatio > 10" class="text-sm font-medium">
-            Relative time bars use a logarithmic scale because the largest ratio exceeds 10×.
-          </p>
-          <div
-            v-for="scenario in reportResults"
-            :key="scenario.scenarioId"
-            class="space-y-2 border-t border-default pt-3"
-          >
-            <NuxtLink class="font-semibold text-primary hover:underline" :to="`/lab/${scenario.scenarioId}`">{{
-              scenarios.find((item) => item.id === scenario.scenarioId)?.title ?? scenario.scenarioId
-            }}</NuxtLink>
-            <div
-              v-for="result in scenario.results"
-              :key="result.engine"
-              class="grid grid-cols-[74px_1fr_100px] items-center gap-3 text-sm"
-            >
-              <EngineBadge :engine="result.engine" />
-              <div
-                class="h-4 rounded bg-elevated"
-                role="img"
-                :aria-label="`${result.engine}: ${result.medianMs?.toFixed(2) ?? 'unavailable'} milliseconds median`"
-              >
-                <div
-                  class="h-full rounded bg-primary"
-                  :style="{
-                    width:
-                      result.ok && result.medianMs !== null
-                        ? barWidth(
-                            result.medianMs,
-                            Math.min(
-                              ...scenario.results
-                                .filter((r) => r.ok && r.medianMs !== null)
-                                .flatMap((r) => (r.medianMs === null ? [] : [r.medianMs])),
-                            ),
-                          )
-                        : '0%',
-                  }"
-                />
-              </div>
-              <span class="text-right tabular-nums">{{ result.medianMs?.toFixed(2) ?? '—' }} ms</span>
-            </div>
-          </div>
-        </div>
-        <UAlert
-          v-else
-          title="No saved benchmark report yet"
-          description="Run benchmarks to publish a report summary here, or run a scenario live below."
-          color="neutral"
-      /></LoadState>
-    </section>
+  <div class="space-y-8">
+    <p v-if="report" class="text-sm text-muted">
+      Median time in milliseconds from the last benchmark ({{ formatTimestamp(report.generatedAt) }},
+      {{ report.scale }} dataset, {{ report.iterations }} runs, {{ report.machine }}). Bold is fastest.
+    </p>
+    <p v-else class="text-sm text-muted">No saved times yet. Run <code>bun run bench</code> to fill the table.</p>
     <LoadState :status="status" :error="error">
-      <section class="space-y-3">
-        <h2 class="text-2xl font-semibold">Lecture 1 · Documents</h2>
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <LabScenarioCard v-for="scenario in lectureOne" :key="scenario.id" :scenario="scenario" />
-        </div>
-      </section>
-      <section class="space-y-3">
-        <h2 class="text-2xl font-semibold">Lecture 2 · Relationships</h2>
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <LabScenarioCard v-for="scenario in lectureTwo" :key="scenario.id" :scenario="scenario" />
-        </div>
-      </section>
+      <div class="space-y-8">
+        <PageSection v-for="group in lectures" :key="group.lecture" :title="`Class ${group.lecture}`">
+          <DataTable :rows="rows(group.scenarios)" :columns="columns" :row-key="(row) => row.id">
+            <template #title="{ row }">
+              <ULink :to="`/lab/${row.id}`" class="text-default underline">{{ row.title }}</ULink>
+            </template>
+            <template v-for="engine in ENGINES" :key="engine" #[engine]="{ row }">
+              <span v-if="row.times.has(engine)" :class="row.times.get(engine) === row.fastest ? 'font-bold' : ''">
+                {{ row.times.get(engine)?.toFixed(2) }}
+              </span>
+              <span v-else class="text-muted">{{ row.engines.includes(engine) ? 'not run' : '' }}</span>
+            </template>
+          </DataTable>
+        </PageSection>
+      </div>
     </LoadState>
-  </main>
+  </div>
 </template>

@@ -3,6 +3,7 @@ const LABELS: Record<string, string> = {
   storage_gb: 'Storage (GB)',
   color: 'Colour',
   wifi6: 'Wi-Fi 6',
+  capacity_gb: 'Capacity (GB)',
   warranty_years: 'Warranty (years)',
   screen_inches: 'Screen (inches)',
 }

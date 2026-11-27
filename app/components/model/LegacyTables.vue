@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import schema from '~~/database/mysql/schema.sql?raw'
 
-/** The real legacy DDL, so the page can never drift from the benchmarked tables. */
+/** Read from the real schema file, so the page matches the tables used in the comparisons. */
 const tables = [...schema.matchAll(/CREATE TABLE (\w+) \([\s\S]*?\n\);/g)].map((match) => ({
   name: match[1]!,
   ddl: match[0],
@@ -10,23 +10,19 @@ const tables = [...schema.matchAll(/CREATE TABLE (\w+) \([\s\S]*?\n\);/g)].map((
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="flex items-center gap-2">
-      <EngineBadge engine="mysql" />
-      <h2 class="text-2xl font-semibold">Before: {{ tables.length }} legacy tables</h2>
-    </div>
-    <p class="text-muted">
-      A well indexed, normalised schema. Open a table to see its definition and the foreign keys a read has to join
-      across.
-    </p>
-    <div class="grid items-start gap-2 lg:grid-cols-3">
-      <details v-for="table in tables" :key="table.name" class="rounded-lg border border-default open:lg:col-span-3">
-        <summary class="cursor-pointer px-3 py-2 font-mono text-sm">
-          {{ table.name }}
-          <span v-if="table.foreignKeys" class="text-muted">· {{ table.foreignKeys }} FK</span>
-        </summary>
-        <pre class="overflow-auto bg-neutral-950 px-4 py-3 text-sm text-neutral-100">{{ table.ddl }}</pre>
-      </details>
-    </div>
-  </section>
+  <PageSection :title="`MySQL: ${tables.length} tables`" note="Open a table to read its definition.">
+    <ul class="divide-y divide-default border-y border-default text-sm">
+      <li v-for="table in tables" :key="table.name">
+        <details>
+          <summary class="flex cursor-pointer justify-between gap-3 py-1.5">
+            <span class="font-mono">{{ table.name }}</span>
+            <span v-if="table.foreignKeys" class="text-muted">
+              {{ table.foreignKeys }} foreign {{ table.foreignKeys === 1 ? 'key' : 'keys' }}
+            </span>
+          </summary>
+          <CodeBlock class="mb-2" :code="table.ddl" />
+        </details>
+      </li>
+    </ul>
+  </PageSection>
 </template>

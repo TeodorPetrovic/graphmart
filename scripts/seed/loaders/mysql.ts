@@ -24,9 +24,7 @@ const tablesToAnalyze = [
 export async function loadMysql(data: Dataset): Promise<void> {
   const connection = await mysqlPool().getConnection()
   try {
-    await connection.query('SET FOREIGN_KEY_CHECKS = 0')
-    await dropExistingTables(connection)
-    await createSchema(connection)
+    await recreateMysqlTables(connection)
     await loadUsers(connection, data)
     await loadCatalog(connection, data)
     await loadCommerce(connection, data)
@@ -38,9 +36,14 @@ export async function loadMysql(data: Dataset): Promise<void> {
   }
 }
 
-async function dropExistingTables(
-  connection: Awaited<ReturnType<ReturnType<typeof mysqlPool>['getConnection']>>,
-): Promise<void> {
+/** Drops every table and creates the empty schema. Leaves foreign key checks off for loading. */
+async function recreateMysqlTables(connection: DbConnection): Promise<void> {
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0')
+  await dropExistingTables(connection)
+  await createSchema(connection)
+}
+
+async function dropExistingTables(connection: DbConnection): Promise<void> {
   const [rows] = await connection.query<Array<Record<string, string>>>('SHOW TABLES')
   for (const row of rows) {
     const table = Object.values(row)[0]
@@ -48,9 +51,7 @@ async function dropExistingTables(
   }
 }
 
-async function createSchema(
-  connection: Awaited<ReturnType<ReturnType<typeof mysqlPool>['getConnection']>>,
-): Promise<void> {
+async function createSchema(connection: DbConnection): Promise<void> {
   const schemaPath = resolve(import.meta.dir, '../../../database/mysql/schema.sql')
   const schema = await Bun.file(schemaPath).text()
   const statements = schema

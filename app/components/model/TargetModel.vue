@@ -61,36 +61,27 @@ const ownership = [
   { fact: 'FOLLOWS and ROUTE_TO relationships', owner: 'Neo4j', copy: 'none' },
 ]
 const ownershipColumns = [
-  { accessorKey: 'fact', header: 'Fact' },
-  { accessorKey: 'owner', header: 'Written to' },
-  { accessorKey: 'copy', header: 'Copied through the outbox to' },
+  { key: 'fact', label: 'Data' },
+  { key: 'owner', label: 'Written to' },
+  { key: 'copy', label: 'Copied to' },
 ]
 </script>
 
 <template>
   <div class="space-y-8">
-    <section class="space-y-3">
-      <h2 class="flex items-center gap-2 text-2xl font-semibold">
-        <EngineBadge engine="mongo" /> After: documents shaped like the screens
-      </h2>
+    <PageSection title="MongoDB: one document per product and per order">
       <div class="grid gap-4 xl:grid-cols-2">
-        <UCard v-for="document in documents" :key="document.title">
-          <template #header
-            ><h3 class="font-mono font-semibold">{{ document.title }}</h3></template
-          >
-          <pre class="overflow-auto rounded-lg bg-neutral-950 p-4 text-sm text-neutral-100">{{ document.code }}</pre>
-        </UCard>
+        <div v-for="document in documents" :key="document.title" class="space-y-1">
+          <h3 class="font-mono text-sm">{{ document.title }}</h3>
+          <CodeBlock :code="document.code" />
+        </div>
       </div>
-    </section>
-    <section class="space-y-3">
-      <h2 class="flex items-center gap-2 text-2xl font-semibold">
-        <EngineBadge engine="neo4j" /> After: join tables become named relationships
-      </h2>
+    </PageSection>
+    <PageSection title="Neo4j: join tables become named relationships">
       <GraphView :graph="graph" height="520px" />
-    </section>
-    <section class="space-y-3">
-      <h2 class="text-2xl font-semibold">Each fact has exactly one owner</h2>
-      <UTable :data="ownership" :columns="ownershipColumns" />
-    </section>
+    </PageSection>
+    <PageSection title="Where each fact is written">
+      <DataTable :rows="ownership" :columns="ownershipColumns" />
+    </PageSection>
   </div>
 </template>

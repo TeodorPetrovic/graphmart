@@ -52,7 +52,7 @@ export const friendsNetwork: Scenario = {
   engines: [
     mysqlEngine({
       label: 'Recursive CTE frontier',
-      notes: ['The primary key on (follower_id, followee_id) serves each frontier expansion.'],
+      notes: ['The primary key on (follower_id, followee_id) supports each frontier expansion.'],
       sql: SQL,
       values: (p) => [p.userId as number, p.depth as number],
     }),

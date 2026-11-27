@@ -44,7 +44,7 @@ export const shortestPath: Scenario = {
   engines: [
     mysqlEngine({
       label: 'Recursive BFS frontier',
-      notes: ['The followee-leading primary key serves each outgoing frontier expansion.'],
+      notes: ['The primary key that starts with followee_id supports each outgoing frontier expansion.'],
       sql: SQL,
       values: (p) => [p.fromId as number, p.maxDepth as number, p.toId as number],
     }),

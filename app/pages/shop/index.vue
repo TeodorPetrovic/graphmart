@@ -1,228 +1,188 @@
 <script setup lang="ts">
 import type { CategoryTreeResponse, ProductSearchResponse, ProductSummary } from '#shared/types/api'
+import { formatPrice } from '#shared/utils/demo'
+import type { LocationQueryRaw } from 'vue-router'
 import { useCart } from '~/composables/useCart'
+
+/** Select menus cannot hold an empty string, so "no filter" needs its own value. */
+const ANY = '__any'
+const SORTS = [
+  { label: 'Relevance', value: 'relevance' },
+  { label: 'Price, low to high', value: 'price_asc' },
+  { label: 'Price, high to low', value: 'price_desc' },
+  { label: 'Rating', value: 'rating' },
+  { label: 'Newest', value: 'newest' },
+]
+
 const route = useRoute()
 const router = useRouter()
-const {
-  data: categoryData,
-  status: categoryStatus,
-  error: categoryError,
-} = useFetch<CategoryTreeResponse>('/api/catalog/categories')
-const categoryLoadError = useLoadError(categoryError)
-const q = ref(String(route.query.q ?? ''))
-const categoryId = ref(String(route.query.categoryId ?? ''))
-const brand = ref(String(route.query.brand ?? ''))
-const minPrice = ref(priceQueryToInput(route.query.minPrice))
-const maxPrice = ref(priceQueryToInput(route.query.maxPrice))
-const sort = ref(String(route.query.sort ?? 'relevance'))
-watch(
-  () => route.query,
-  (query) => {
-    q.value = String(query.q ?? '')
-    categoryId.value = String(query.categoryId ?? '')
-    brand.value = String(query.brand ?? '')
-    minPrice.value = priceQueryToInput(query.minPrice)
-    maxPrice.value = priceQueryToInput(query.maxPrice)
-    sort.value = String(query.sort ?? 'relevance')
-  },
-)
-const page = computed(() => Math.max(1, Number(route.query.page ?? 1) || 1))
-const attrs = computed(() =>
-  (Array.isArray(route.query.attr) ? route.query.attr : route.query.attr ? [route.query.attr] : []).map(String),
-)
-const query = computed(() => ({
-  q: route.query.q,
-  categoryId: route.query.categoryId,
-  brand: route.query.brand,
-  minPrice: route.query.minPrice,
-  maxPrice: route.query.maxPrice,
-  sort: route.query.sort,
-  page: route.query.page,
-  attr: attrs.value,
-}))
-const { data, status, error } = useFetch<ProductSearchResponse>('/api/catalog/products', { query, watch: [query] })
-const loadError = useLoadError(error)
 const cart = useCart()
+const toast = useToast()
+const { data: categoryData, error: categoryError } = useFetch<CategoryTreeResponse>('/api/catalog/categories')
+const categoryLoadError = useLoadError(categoryError)
+
 function priceQueryToInput(value: unknown): string {
   const cents = Number(value)
   return value === undefined || value === null || !Number.isFinite(cents) ? '' : String(cents / 100)
 }
-function update(patch: Record<string, string | number | string[] | null | undefined>) {
-  const next: Record<string, string | number | string[] | null | undefined> = {
-    ...route.query,
-    ...patch,
-    page: patch.page ?? 1,
+function formFromRoute() {
+  const text = (value: unknown) => String(value ?? '')
+  return {
+    q: text(route.query.q),
+    categoryId: text(route.query.categoryId) || ANY,
+    brand: text(route.query.brand) || ANY,
+    minPrice: priceQueryToInput(route.query.minPrice),
+    maxPrice: priceQueryToInput(route.query.maxPrice),
   }
-  for (const [key, value] of Object.entries(next))
-    if (value === '' || value === null || value === undefined) delete next[key]
-  router.replace({ query: next })
+}
+const form = reactive(formFromRoute())
+watch(
+  () => route.query,
+  () => Object.assign(form, formFromRoute()),
+)
+
+const page = computed(() => Math.max(1, Number(route.query.page ?? 1) || 1))
+const attrs = computed(() => [route.query.attr ?? []].flat().map(String))
+const query = computed(() => ({ ...route.query, attr: attrs.value }))
+const { data, status, error } = useFetch<ProductSearchResponse>('/api/catalog/products', { query, watch: [query] })
+const loadError = useLoadError(error)
+
+function update(patch: Record<string, string | number | string[]>) {
+  const next: LocationQueryRaw = { ...route.query, page: 1, ...patch }
+  const kept = Object.entries(next).filter(([, value]) => value !== '' && value !== ANY && value !== undefined)
+  router.replace({ query: Object.fromEntries(kept) })
 }
 function submitFilters() {
-  update({
-    q: q.value,
-    categoryId: categoryId.value,
-    brand: brand.value,
-    minPrice: minPrice.value ? String(Math.round(Number(minPrice.value) * 100)) : '',
-    maxPrice: maxPrice.value ? String(Math.round(Number(maxPrice.value) * 100)) : '',
-    sort: sort.value,
-  })
+  const toCents = (euros: string) => (euros === '' ? '' : String(Math.round(Number(euros) * 100)))
+  update({ ...form, minPrice: toCents(String(form.minPrice)), maxPrice: toCents(String(form.maxPrice)) })
 }
-function toggleAttr(key: string, value: string) {
-  const item = `${key}:${value}`
+function toggleAttr(item: string) {
   update({ attr: attrs.value.includes(item) ? attrs.value.filter((a) => a !== item) : [...attrs.value, item] })
 }
-function changeSort(event: Event) {
-  if (!(event.target instanceof HTMLSelectElement)) return
-  sort.value = event.target.value
-  update({ sort: sort.value })
+
+function flatten(nodes: CategoryTreeResponse['tree'], depth = 0): { label: string; value: string }[] {
+  return nodes.flatMap((node) => [
+    { label: `${' '.repeat(depth)}${node.name}`, value: String(node.id) },
+    ...flatten(node.children, depth + 1),
+  ])
 }
-function flatten(nodes: CategoryTreeResponse['tree'], depth = 0): { id: number; name: string; depth: number }[] {
-  return nodes.flatMap((node) => [{ id: node.id, name: node.name, depth }, ...flatten(node.children, depth + 1)])
-}
-const categories = computed(() => (categoryData.value ? flatten(categoryData.value.tree) : []))
-const priceCeiling = computed(() =>
-  Math.max(100, ...(data.value?.facets.priceBuckets ?? []).map((bucket) => bucket.max ?? bucket.min)),
-)
-const priceRange = computed({
-  get: () => [Number(minPrice.value) || 0, Number(maxPrice.value) || priceCeiling.value / 100],
-  set: (value: number[]) => {
-    minPrice.value = String(value[0] ?? 0)
-    maxPrice.value = String(value[1] ?? priceCeiling.value / 100)
-  },
-})
-const activeFilters = computed(() => [
-  ...attrs.value.map((value) => ({ label: filterLabel(value), key: 'attr' })),
-  ...(route.query.q ? [{ label: `Search · ${route.query.q}`, key: 'q' }] : []),
-  ...(route.query.categoryId
-    ? [
-        {
-          label:
-            categories.value.find((item) => String(item.id) === String(route.query.categoryId))?.name ?? 'Category',
-          key: 'categoryId',
-        },
-      ]
-    : []),
-  ...(route.query.brand ? [{ label: `Brand · ${route.query.brand}`, key: 'brand' }] : []),
+const categories = computed(() => [
+  { label: 'All categories', value: ANY },
+  ...(categoryData.value ? flatten(categoryData.value.tree) : []),
 ])
-function filterLabel(filter: string) {
-  const [key = '', value = ''] = filter.split(':')
-  return `${attributeLabel(key)}: ${attributeValue(value)}`
-}
+const brands = computed(() => [
+  { label: 'Any brand', value: ANY },
+  ...(data.value?.facets.brands ?? []).map((facet) => ({
+    label: `${facet.value} (${facet.count})`,
+    value: facet.value,
+  })),
+])
 function add(product: ProductSummary) {
   cart.add(product)
+  toast.add({ title: 'Added to cart', description: product.name })
 }
 </script>
 
 <template>
-  <div class="space-y-6">
-    <PageHeader title="Find your next favourite" description="Pick a category and the filters change to match it." />
-    <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <aside class="h-fit rounded-xl border border-default bg-elevated/30 p-4">
-        <h2 class="text-lg font-bold">Refine results</h2>
-        <form class="mt-4 space-y-4" @submit.prevent="submitFilters">
-          <UFormField label="Search"><UInput v-model="q" placeholder="Product or keyword" class="w-full" /></UFormField>
-          <UFormField label="Category"
-            ><select v-model="categoryId" class="w-full rounded-lg border border-default bg-default px-3 py-2 text-sm">
-              <option value="">All categories</option>
-              <option v-for="category in categories" :key="category.id" :value="String(category.id)">
-                {{ '　'.repeat(category.depth) }}{{ category.name }}
-              </option>
-            </select></UFormField
-          >
-          <p v-if="categoryStatus === 'pending'" class="text-xs text-muted" role="status">Loading categories…</p>
-          <p v-if="categoryLoadError" class="text-xs text-error" role="alert">
-            {{ categoryLoadError.message }}
-          </p>
-          <UFormField label="Brand"
-            ><select v-model="brand" class="w-full rounded-lg border border-default bg-default px-3 py-2 text-sm">
-              <option value="">Any brand</option>
-              <option v-for="facet in data?.facets.brands" :key="facet.value" :value="facet.value">
-                {{ facet.value }} ({{ facet.count }})
-              </option>
-            </select></UFormField
-          >
-          <div class="grid grid-cols-2 gap-2">
-            <UFormField label="Min €"
-              ><UInput v-model="minPrice" type="number" min="0" step="1" placeholder="0" /></UFormField
-            ><UFormField label="Max €"
-              ><UInput v-model="maxPrice" type="number" min="0" step="1" placeholder="Any"
-            /></UFormField>
-          </div>
-          <div class="space-y-2 rounded-lg bg-elevated/40 p-3">
-            <div class="flex items-center justify-between text-sm">
-              <span>Price range</span><span class="text-muted">€{{ priceRange[0] }} – €{{ priceRange[1] }}</span>
-            </div>
-            <USlider
-              v-model="priceRange"
-              :min="0"
-              :max="Math.ceil(priceCeiling / 100)"
-              :step="1"
-              :ui="{ root: 'py-2' }"
-            />
-          </div>
-          <div v-for="facet in data?.facets.attributes" :key="facet.key">
-            <h3 class="mb-2 text-sm font-semibold">{{ attributeLabel(facet.key) }}</h3>
-            <label
-              v-for="option in facet.values"
-              :key="option.value"
-              class="flex cursor-pointer items-center gap-2 py-1 text-sm"
-              ><input
-                type="checkbox"
-                :checked="attrs.includes(`${facet.key}:${option.value}`)"
-                @change="toggleAttr(facet.key, option.value)"
-              /><span>{{ attributeValue(option.value) }}</span
-              ><span class="ml-auto text-muted">{{ option.count }}</span></label
-            >
-          </div>
-          <UButton type="submit" block>Apply filters</UButton>
-        </form>
-      </aside>
-      <section class="min-w-0">
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p class="text-sm text-muted">{{ data ? formatCount(data.total) : '—' }} products</p>
-          <label class="flex items-center gap-2 text-sm"
-            >Sort
-            <select :value="sort" class="rounded-lg border border-default bg-default px-3 py-2" @change="changeSort">
-              <option value="relevance">Recommended</option>
-              <option value="price_asc">Price: low to high</option>
-              <option value="price_desc">Price: high to low</option>
-              <option value="rating">Top rated</option>
-              <option value="newest">Newest</option>
-            </select></label
-          >
-        </div>
-        <div v-if="activeFilters.length" class="mb-4 flex flex-wrap items-center gap-2" aria-label="Active filters">
-          <UBadge
-            v-for="(filter, index) in activeFilters"
-            :key="`${filter.key}-${index}`"
-            color="primary"
-            variant="subtle"
-            >{{ filter.label }}</UBadge
-          >
-          <UButton size="xs" color="neutral" variant="ghost" @click="router.replace({ query: {} })">Clear all</UButton>
-        </div>
-        <InsightFeatureInsight class="mb-4" feature="search" :trace="data?.trace" />
-        <LoadState :status="status" :error="loadError">
-          <UPageGrid v-if="data?.items.length" class="gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-            <ShopProductCard v-for="product in data?.items" :key="product.id" :product="product" @add="add" />
-          </UPageGrid>
-        </LoadState>
-        <p v-if="data && !data.items.length" class="rounded-xl border border-default p-8 text-center text-muted">
-          No products match these filters. Adjust the search or clear a filter to try again.
-        </p>
-        <div
-          v-if="data && data.total > data.pageSize"
-          class="mt-5 flex items-center justify-between rounded-xl border border-default p-3"
-        >
-          <span class="text-sm text-muted">Page {{ data.page }} of {{ Math.ceil(data.total / data.pageSize) }}</span>
-          <UPagination
-            :page="page"
-            :items-per-page="data.pageSize"
-            :total="data.total"
-            @update:page="update({ page: $event })"
+  <div class="grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
+    <form class="space-y-4" aria-label="Filters" @submit.prevent="submitFilters">
+      <UFormField label="Search">
+        <UInput v-model="form.q" placeholder="Name or keyword" class="w-full" />
+      </UFormField>
+      <UFormField label="Category" :error="categoryLoadError?.message">
+        <USelect
+          :model-value="form.categoryId"
+          :items="categories"
+          class="w-full"
+          @update:model-value="update({ categoryId: String($event), attr: [] })"
+        />
+      </UFormField>
+      <UFormField label="Brand">
+        <USelect
+          :model-value="form.brand"
+          :items="brands"
+          class="w-full"
+          @update:model-value="update({ brand: String($event) })"
+        />
+      </UFormField>
+      <div class="grid grid-cols-2 gap-2">
+        <UFormField label="Min price (€)">
+          <UInput v-model="form.minPrice" type="number" min="0" />
+        </UFormField>
+        <UFormField label="Max price (€)">
+          <UInput v-model="form.maxPrice" type="number" min="0" />
+        </UFormField>
+      </div>
+      <div class="flex gap-2">
+        <UButton type="submit">Apply</UButton>
+        <UButton color="neutral" variant="ghost" @click="router.replace({ query: {} })">Clear</UButton>
+      </div>
+      <fieldset v-for="facet in data?.facets.attributes" :key="facet.key" class="space-y-1">
+        <legend class="mb-1 text-sm font-medium">{{ attributeLabel(facet.key) }}</legend>
+        <UCheckbox
+          v-for="option in facet.values"
+          :key="option.value"
+          :model-value="attrs.includes(`${facet.key}:${option.value}`)"
+          :label="`${attributeValue(option.value)} (${option.count})`"
+          @update:model-value="toggleAttr(`${facet.key}:${option.value}`)"
+        />
+      </fieldset>
+    </form>
+
+    <div class="min-w-0 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm font-medium tabular-nums">{{ data ? `${formatCount(data.total)} products` : 'Loading' }}</p>
+        <div class="flex flex-wrap items-center gap-4">
+          <InsightFeatureInsight feature="search" :trace="data?.trace" />
+          <USelect
+            :model-value="String(route.query.sort ?? 'relevance')"
+            :items="SORTS"
+            aria-label="Sort by"
+            class="w-44"
+            @update:model-value="update({ sort: String($event) })"
           />
         </div>
-      </section>
+      </div>
+      <LoadState :status="status" :error="loadError">
+        <DataTable
+          :rows="data?.items ?? []"
+          :columns="[
+            { key: 'name', label: 'Product' },
+            { key: 'rating', label: 'Rating', align: 'right' },
+            { key: 'stock', label: 'Stock', align: 'right' },
+            { key: 'priceCents', label: 'Price', align: 'right' },
+            { key: 'add', label: '', align: 'right' },
+          ]"
+          :row-key="(product) => product.id"
+          empty="No products match these filters."
+        >
+          <template #name="{ row }">
+            <ULink :to="`/shop/${row.id}`" class="font-medium text-default hover:underline">{{ row.name }}</ULink>
+            <p class="text-muted">{{ row.brand }}</p>
+          </template>
+          <template #rating="{ row }">{{ row.rating.toFixed(1) }} ({{ row.ratingCount }})</template>
+          <template #priceCents="{ row }">{{ formatPrice(row.priceCents) }}</template>
+          <template #add="{ row }">
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :disabled="!row.stock"
+              :aria-label="`Add ${row.name} to cart`"
+              @click="add(row)"
+            >
+              Add
+            </UButton>
+          </template>
+        </DataTable>
+      </LoadState>
+      <UPagination
+        v-if="data && data.total > data.pageSize"
+        :page="page"
+        :items-per-page="data.pageSize"
+        :total="data.total"
+        @update:page="update({ page: $event })"
+      />
     </div>
   </div>
 </template>

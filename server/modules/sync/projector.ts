@@ -1,4 +1,5 @@
 import { ObjectId, type ChangeStream } from 'mongodb'
+import { supportsTransactions } from '../../infrastructure/mongo/atomic'
 import { collections, mongoDb } from '../../infrastructure/mongo/client'
 import type { OutboxDoc, OutboxPayload } from '../../../shared/types/domain'
 import { shell, type Tracer } from '../../infrastructure/trace'
@@ -12,6 +13,7 @@ import { projectRegisteredUser } from './projections/user-registered'
 import { projectUpsertedProduct } from './projections/product-upserted'
 
 let running = false
+let mode: 'change-stream' | 'polling' = 'polling'
 let startedAt: Date | null = null
 let lastEventAt: Date | null = null
 let lastError: string | null = null
@@ -134,6 +136,9 @@ async function watchOutbox(generation: number): Promise<void> {
   while (running && generation === lifecycleGeneration) {
     let currentStream: ChangeStream<StoredOutboxEvent> | null = null
     try {
+      // A single server has no change streams, so the poll timer does all the work.
+      if (!(await supportsTransactions())) return
+      mode = 'change-stream'
       currentStream = mongoDb()
         .collection<StoredOutboxEvent>('outbox')
         .watch([{ $match: { operationType: 'insert' } }])
@@ -181,6 +186,7 @@ export async function stopProjector(): Promise<void> {
 export function projectorState() {
   return {
     running,
+    mode,
     startedAt: startedAt?.toISOString() ?? null,
     lastEventAt: lastEventAt?.toISOString() ?? null,
     lastError,

@@ -87,6 +87,19 @@ const indexes: Record<string, IndexDescription[]> = {
 
 const FIVE_YEARS_SECONDS = 5 * 365 * 24 * 3600
 
+/** The collections and indexes, also written to database/mongodb/setup.js by `bun run db:export`. */
+export const mongoSchema = {
+  validators,
+  indexes,
+  timeSeries: {
+    product_views: {
+      timeseries: { timeField: 'ts', metaField: 'meta', granularity: 'hours' as const },
+      expireAfterSeconds: FIVE_YEARS_SECONDS,
+    },
+  },
+  plain: ['categories', 'warehouses', 'outbox', 'counters'],
+}
+
 /** Creates collections (validators, time series) and indexes. Safe to run repeatedly. */
 export async function ensureMongoSchema(db: Db): Promise<void> {
   const existing = new Set((await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name))
@@ -94,13 +107,10 @@ export async function ensureMongoSchema(db: Db): Promise<void> {
   for (const [name, schema] of Object.entries(validators)) {
     if (!existing.has(name)) await db.createCollection(name, { validator: { $jsonSchema: schema } })
   }
-  if (!existing.has('product_views')) {
-    await db.createCollection('product_views', {
-      timeseries: { timeField: 'ts', metaField: 'meta', granularity: 'hours' },
-      expireAfterSeconds: FIVE_YEARS_SECONDS,
-    })
+  for (const [name, options] of Object.entries(mongoSchema.timeSeries)) {
+    if (!existing.has(name)) await db.createCollection(name, options)
   }
-  for (const name of ['categories', 'warehouses', 'outbox', 'counters']) {
+  for (const name of mongoSchema.plain) {
     if (!existing.has(name)) await db.createCollection(name)
   }
   for (const [name, list] of Object.entries(indexes)) {

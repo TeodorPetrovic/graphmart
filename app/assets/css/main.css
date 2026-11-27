@@ -1,2 +1,12 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
+
+/* Black and white, with colour only where it carries meaning (errors, warnings, graph node kinds). */
+:root {
+  --ui-primary: var(--ui-color-neutral-900);
+  --ui-radius: 0.25rem;
+}
+
+.dark {
+  --ui-primary: var(--ui-color-neutral-100);
+}

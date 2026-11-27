@@ -136,14 +136,17 @@ function draw() {
     maxZoom: 1.6,
     layout: positioned
       ? { name: 'preset', fit: true, padding: 50 }
-      : {
-          name: 'cose',
-          animate: false,
-          randomize: true,
-          padding: 30,
-          nodeRepulsion: () => 9000,
-          idealEdgeLength: () => 90,
-        },
+      : // The force layout piles up the labels of a handful of nodes; a circle keeps them apart.
+        props.graph.nodes.length <= 6
+        ? { name: 'circle', padding: 60, spacingFactor: 1.2 }
+        : {
+            name: 'cose',
+            animate: false,
+            randomize: true,
+            padding: 30,
+            nodeRepulsion: () => 9000,
+            idealEdgeLength: () => 90,
+          },
   })
   instance.on('tap', 'node', (event) => {
     const node = props.graph.nodes.find((n) => n.id === event.target.id())
@@ -170,9 +173,7 @@ onBeforeUnmount(() => instance?.destroy())
       <span v-for="kind in kinds" :key="kind" class="flex items-center gap-1.5">
         <span class="size-3 rounded-full" :style="{ background: COLORS[kind] ?? '#64748b' }" />{{ displayKind(kind) }}
       </span>
-      <span class="ml-auto tabular-nums"
-        >{{ graph.nodes.length }} people and places · {{ graph.edges.length }} connections</span
-      >
+      <span class="ml-auto tabular-nums">{{ graph.nodes.length }} nodes, {{ graph.edges.length }} relationships</span>
     </figcaption>
   </figure>
 </template>

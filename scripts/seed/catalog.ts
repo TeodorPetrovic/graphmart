@@ -67,7 +67,7 @@ export function generateCatalog(count: number, random: RandomSource): CatalogDat
       _id: id,
       sku: `GM-${String(id).padStart(6, '0')}`,
       name,
-      description: `Thoughtfully designed ${family.toLowerCase()} by ${brand}, made for ${productFamily} fans and everyday use.`,
+      description: `${brand} ${family.toLowerCase()}.`,
       categoryId: category._id,
       categoryPath: [...category.ancestors, category._id],
       brand,

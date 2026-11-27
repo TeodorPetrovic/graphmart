@@ -1,8 +1,9 @@
-import { ObjectId, type ClientSession } from 'mongodb'
+import { ObjectId } from 'mongodb'
 import type { CreateOrderRequest } from '../../../shared/types/api'
 import type { Address, OrderDoc, OrderItem, OutboxDoc } from '../../../shared/types/domain'
 import { addressKey } from '../../../shared/utils/address'
-import { collections, mongoClient } from '../../infrastructure/mongo/client'
+import { writeTogether, type WriteScope } from '../../infrastructure/mongo/atomic'
+import { collections } from '../../infrastructure/mongo/client'
 import { shell, type Tracer } from '../../infrastructure/trace'
 
 type CommerceCollections = ReturnType<typeof collections>
@@ -18,7 +19,7 @@ export class OrderFailure extends Error {
 
 async function reserveItems(
   input: CreateOrderRequest,
-  session: ClientSession,
+  { session, onFailure }: WriteScope,
   db: CommerceCollections,
   tracer: Tracer,
 ): Promise<OrderItem[]> {
@@ -34,7 +35,7 @@ async function reserveItems(
     )
     if (!product) throw new OrderFailure(404, `Product ${productId} not found`)
 
-    // The conditional decrement is the inventory race guard; the transaction rolls back earlier lines.
+    // The conditional decrement stops two orders from taking the same stock.
     const stockFilter = { _id: productId, stock: { $gte: quantity } }
     const decrement = { $inc: { stock: -quantity } }
     const result = await tracer.run(
@@ -44,6 +45,7 @@ async function reserveItems(
       () => db.products.updateOne(stockFilter, decrement, { session }),
     )
     if (result.modifiedCount !== 1) throw new OrderFailure(409, `Insufficient stock for product ${productId}`)
+    onFailure(() => db.products.updateOne({ _id: productId }, { $inc: { stock: quantity } }))
     items.push({
       productId,
       name: product.name,
@@ -55,7 +57,7 @@ async function reserveItems(
   return items
 }
 
-function allocateOrderId(session: ClientSession, db: CommerceCollections, tracer: Tracer): Promise<number> {
+function allocateOrderId(session: WriteScope['session'], db: CommerceCollections, tracer: Tracer): Promise<number> {
   const filter = { _id: 'orders' }
   const update = { $inc: { seq: 1 } }
   return tracer.run('mongo', 'Allocate order id', shell('counters', 'findOneAndUpdate', filter, update), async () => {
@@ -105,13 +107,14 @@ function makeOutboxEvent(order: OrderDoc, eventId: ObjectId): OutboxDoc & { _id:
   }
 }
 
-async function createOrderInTransaction(
+async function saveOrder(
   input: CreateOrderRequest,
   eventId: ObjectId,
-  session: ClientSession,
+  scope: WriteScope,
   db: CommerceCollections,
   tracer: Tracer,
 ): Promise<OrderDoc> {
+  const { session } = scope
   const userFilter = { _id: input.userId }
   const user = await tracer.run('mongo', 'Check order user', shell('users', 'findOne', userFilter), () =>
     db.users.findOne(userFilter, { session }),
@@ -120,12 +123,13 @@ async function createOrderInTransaction(
   const shippingAddress = user.addresses[0]
   if (!shippingAddress) throw new OrderFailure(400, 'User has no shipping address')
 
-  const items = await reserveItems(input, session, db, tracer)
+  const items = await reserveItems(input, scope, db, tracer)
   const orderId = await allocateOrderId(session, db, tracer)
   const order = makeOrder(input, items, orderId, shippingAddress)
   await tracer.run('mongo', 'Insert order', shell('orders', 'insertOne', order), () =>
     db.orders.insertOne(order, { session }),
   )
+  scope.onFailure(() => db.orders.deleteOne({ _id: order._id }))
   const outboxEvent = makeOutboxEvent(order, eventId)
   await tracer.run('mongo', 'Write order outbox event', shell('outbox', 'insertOne', outboxEvent), () =>
     db.outbox.insertOne(outboxEvent, { session }),
@@ -135,14 +139,7 @@ async function createOrderInTransaction(
 
 export async function createOrder(input: CreateOrderRequest, tracer: Tracer) {
   const db = collections()
-  const session = mongoClient().startSession()
   const eventId = new ObjectId()
-  let order: OrderDoc | undefined
-  try {
-    order = await session.withTransaction(() => createOrderInTransaction(input, eventId, session, db, tracer))
-  } finally {
-    await session.endSession()
-  }
-  if (!order) throw new Error('Order transaction completed without an order')
+  const order = await writeTogether((scope) => saveOrder(input, eventId, scope, db, tracer))
   return { order, eventId: eventId.toHexString() }
 }

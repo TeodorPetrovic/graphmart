@@ -29,7 +29,7 @@ export const indexImpact: Scenario = {
   nosqlWin: 'The compound user/date index narrows the read and provides its requested order.',
   talkingPoints: [
     'The result is identical in both runs; only access path changes.',
-    'A forced collection scan is useful as a teaching contrast, not as a production recommendation.',
+    'A forced collection scan lets us compare the indexed query with a full scan.',
     'The date boundary matches the deterministic seed window.',
   ],
   params: [

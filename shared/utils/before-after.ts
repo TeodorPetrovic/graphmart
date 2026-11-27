@@ -18,7 +18,7 @@ export interface BeforeAfter {
 export const BEFORE_AFTER: BeforeAfter[] = [
   {
     id: 'network-1-to-3',
-    title: 'My network, 1 to 3 hops',
+    title: 'My network at 1 to 3 steps',
     question: 'Who can user 1 reach by following at most three accounts?',
     sql: `
 SELECT DISTINCT reached.id
@@ -48,13 +48,13 @@ MATCH (me:User {id: 1})-[:FOLLOWS*1..3]->(person:User)
 WHERE person <> me
 RETURN DISTINCT person.id AS id
 ORDER BY id`,
-    changes: 'Every extra hop adds another level of nesting in SQL. In Cypher it changes one number in *1..3.',
+    changes: 'Each extra hop adds another level of nesting in SQL. In Cypher, change the upper bound in *1..3.',
     scenarioId: 'friends-network',
   },
   {
     id: 'people-you-may-know',
     title: 'People you may know',
-    question: 'Who is followed by at least two people I follow, and not yet by me?',
+    question: 'Who is followed by at least two people I follow, excluding people I already follow?',
     sql: `
 SELECT candidate.id
 FROM (
@@ -76,7 +76,7 @@ WHERE mutualCount >= 2
 RETURN candidate.id AS id
 ORDER BY id`,
     changes:
-      'The same inner query ("whom do I follow") is written twice in SQL. The pattern states the path once. MySQL is still very fast here: two hops over a good index is cheap.',
+      'SQL repeats the inner query that finds people I follow. The graph pattern states the path once. MySQL is fast here: two hops over a good index is cheap.',
     scenarioId: 'people-you-may-know',
   },
   {
@@ -107,7 +107,7 @@ ORDER BY id`,
   },
   {
     id: 'shared-identity',
-    title: 'Fraud: who shares a card, device or address with a suspect',
+    title: 'Fraud: accounts that share a card, device, or address',
     question: 'Which accounts are directly linked to user 101?',
     sql: `
 SELECT u.id
@@ -141,7 +141,7 @@ MATCH (:User {id: 101})-[:USED_DEVICE|PAID_WITH|SHIPS_TO]->(shared)
 RETURN DISTINCT linked.id AS id
 ORDER BY id`,
     changes:
-      'Device, card and address are columns in SQL, so each needs its own correlated block. As nodes they are one pattern, and a longer chain is just a longer pattern.',
+      'Device, card, and address are columns in SQL, so each needs its own correlated block. In the graph they form one pattern, with longer chains expressed as longer patterns.',
     scenarioId: 'fraud-rings',
   },
   {

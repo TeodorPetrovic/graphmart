@@ -1,0 +1,15 @@
+{
+  "scale": "small",
+  "generatedAt": "2026-11-27T07:39:17.829Z",
+  "counts": {
+    "users": 2000,
+    "categories": 51,
+    "products": 1000,
+    "orders": 8000,
+    "reviews": 5000,
+    "views": 30000,
+    "follows": 16087,
+    "warehouses": 12,
+    "routes": 38
+  }
+}

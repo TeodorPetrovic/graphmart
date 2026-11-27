@@ -2,114 +2,129 @@
 
 # GraphMart
 
-An online shop that does things its old MySQL version struggled with, using **MongoDB** for what
-things are (products, orders) and **Neo4j** for how they connect (people, purchases, fraud,
-routes). Fullstack **Nuxt 4** with **Nuxt UI**, running on **Bun**.
+An online shop for a non-relational databases course. MongoDB holds products and orders, Neo4j holds
+how people, purchases, cards and warehouses are connected, and MySQL holds the old table version for
+comparison. Built with Nuxt 4, Nuxt UI and Bun.
 
-## Start
+## Set up on Windows
 
-Requirements: Bun, MongoDB Server 8, MySQL Server 8, a Java 21 runtime (Neo4j Desktop ships one)
-and the Neo4j Community zip (tested with 2026.03.1) from neo4j.com, unpacked into `.tools/`. The
-databases, their data and Neo4j itself are not part of the repository. These scripts have only been
-run on Windows.
+You need [Bun](https://bun.sh), MongoDB 8, Neo4j (Neo4j Desktop is fine) and MySQL 8. MySQL is only
+used by the comparisons.
 
-```bash
+1. In Neo4j Desktop, create a new instance for this project and start it. Loading the data replaces
+   everything in that database.
+2. In MySQL Workbench, open and run `database/mysql/create-database.sql` as root.
+3. In a terminal:
+
+```powershell
 git clone https://github.com/TeodorPetrovic/graphmart.git
 cd graphmart
 bun install
-bun run db:setup                 # once
-bun run db:up                    # starts all three databases
-bun run seed                     # same dataset into all three, about 4 minutes
-bun run bench                    # measures all 17 scenarios
-bun run build && bun run start   # http://localhost:3000
+copy .env.example .env      # then set your MongoDB address and Neo4j password in .env
+bun run db:check            # says which database it cannot reach, and why
+bun run db:import           # loads the files in database/, up to 2 minutes
+bun run build
+bun run start               # http://localhost:3000
 ```
 
-`bun run dev` gives hot reload while editing. Present with the production build, and start it with
-`bun run start`: that script raises Bun's 10 second connection timeout, which long benchmark runs
-and graph rebuilds exceed.
+If your MongoDB asks for a login, put it in `.env`:
+`MONGO_URI=mongodb://USER:PASSWORD@127.0.0.1:27017/?authSource=admin&directConnection=true`
 
-The databases are **private copies**: data in `.data/`, ports 27027 (MongoDB), 3317 (MySQL),
-7697 and 7484 (Neo4j), bound to this computer only. Installed database services and Neo4j Desktop
-projects are not touched. MongoDB runs without a password and the others use the development
-password in `.env.example`, so do not expose them. `docker-compose.yml` is meant to replace
-`db:setup` and `db:up` for Docker users, but it has not been tested.
+`db:import` and `seed` stop without changing anything when a database already holds data. Add
+`--replace` to delete it and load again. Add `--only neo4j` (or `mongo`, `mysql`) for one database.
 
-Stop them with `bun run db:down`. After a reboot run `db:up` again.
+## Data
 
-## For the presentation
+|               | `bun run db:import`             | `bun run seed`          |
+| ------------- | ------------------------------- | ----------------------- |
+| Source        | files in [database/](database/) | generated while loading |
+| Users, orders | 2,000 and 8,000                 | 20,000 and 100,000      |
+| Use it for    | showing the app                 | the performance classes |
 
-| Document                                               | Content                                              |
-| ------------------------------------------------------ | ---------------------------------------------------- |
-| [docs/LECTURE-1.md](docs/LECTURE-1.md)                 | Class 1: the shop, flexible products and safe orders |
-| [docs/LECTURE-2.md](docs/LECTURE-2.md)                 | Class 2: connections, fraud and delivery             |
-| [docs/SQL-BEFORE-AFTER.md](docs/SQL-BEFORE-AFTER.md)   | The old nested queries next to the Cypher            |
-| [docs/BENCHMARKS.md](docs/BENCHMARKS.md)               | Every scenario: all queries, plans and timings       |
-| [database/mysql/schema.sql](database/mysql/schema.sql) | The old MySQL tables                                 |
-| [docs/DATA-MODEL.md](docs/DATA-MODEL.md)               | Collections, node labels, relationships, ownership   |
+`bun run bench` measures all 17 comparisons on whatever is loaded and writes
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md). The [database folder](database/README.md) explains how to
+load the files by hand with Compass, Workbench and Neo4j Desktop.
 
-In the app: `/present` (agenda and timer), `/lab` (live comparisons), `/model` (before and after).
+## Transactions need a replica set
 
-## What the measurements say
+A MongoDB installed as a Windows service usually runs as a single server. The app works that way, but
+it saves an order step by step (reversing the steps if one fails) and checks for new events every
+second. To show real transactions and change streams, turn the server into a one-member replica set.
+These steps change your MongoDB service and have not been tried on this machine.
 
-Medium dataset, one machine, one user at a time. Full table in `docs/BENCHMARKS.md`.
+1. Add to `C:\Program Files\MongoDB\Server\8.2\bin\mongod.cfg`:
 
-- **Neo4j wins deep traversals.** Shortest path (limit 5): 1.8 ms against 261 ms. Network at five
-  hops: about 5 times faster. Also bought: about 3.5 times faster.
-- **MySQL wins shallow and analytical queries.** One or two hops, small routes, monthly revenue.
-- **MongoDB was not faster than MySQL in any read scenario.** It was 1.2 to 1.8 times slower on
-  faceted search, the product page and attribute filtering, and 2 to 7 times slower on order
-  history, analytics, trees and referrals. What it adds here is a simpler data shape, flexible
-  attributes, atomic order documents, and transactions with change streams.
-- **Indexes matter most:** about 40 times faster with the right index, in both MongoDB and MySQL.
-
-## What you can show
-
-| Page              | What it does for people                                                 | Database features behind it                        |
-| ----------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
-| For you           | suggestions that name who led to them                                   | graph traversal, collaborative similarity          |
-| Browse, product   | filters that adapt to each category                                     | attribute pattern, `$facet`, `$bucket`, text index |
-| Product           | who you know that bought it, and through whom                           | `FOLLOWS` 1..2 hops, paths                         |
-| Checkout          | delivery routes and a safety warning before payment, live updates after | transaction, outbox, change stream                 |
-| My orders         | prices as paid                                                          | embedded order snapshots                           |
-| People            | suggestions, circle at 1..3 steps, how two people connect, referrals    | `SHORTEST`, variable length paths                  |
-| Trust & safety    | fraud rings and referral loops                                          | shared node patterns, cycles                       |
-| Delivery          | fastest, shortest, fewest stops                                         | weighted paths with `reduce()`                     |
-| Store insights    | revenue and customers                                                   | aggregation pipelines, `$setWindowFields`          |
-| Behind the scenes | 17 old-versus-new comparisons, data model, live sync                    | plans and result checks                            |
-
-Each feature has a **How this works** button with the old approach, the new one and the real queries.
-
-## Architecture
-
-```
-Nuxt pages -> server/api -> server/modules -> MongoDB  (documents, source of truth)
-                                    |             | transaction: order + outbox event
-                                    |             v change stream
-                                    |         projector --MERGE--> Neo4j (relationships)
-                                    +--------------------------------^
-MySQL: the old model, used only by the performance lab
+```yaml
+replication:
+  replSetName: rs0
 ```
 
-```
-app/                 pages, components, composables
-server/api/          HTTP routes: validate input, call a module
-server/modules/      one folder per feature; lab/ holds the benchmark scenarios
-server/infrastructure/  database clients, indexes, constraints
-shared/              types and constants used by both sides
-scripts/             database processes, seed, benchmark, example check
+If the file has `authorization: enabled`, MongoDB also needs a key file. Put a long random line of
+letters and digits in a file, and add `keyFile: C:\path\to\that\file` under `security:`.
+
+2. Restart the service from an administrator PowerShell: `Restart-Service MongoDB`
+3. In the Compass shell, signed in as an administrator:
+   `rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27017' }] })`
+4. Restart the app. The Sync page then says "Change stream".
+
+## Separate database copies (optional)
+
+To keep your installed servers untouched, the project can run its own copies on other ports. This
+needs the MongoDB and MySQL programs installed, Java 21, and the Neo4j Community zip unpacked into
+`.tools/`.
+
+```powershell
+copy .env.private.example .env
+bun run db:setup     # once
+bun run db:up        # after every reboot; bun run db:down stops them
+bun run db:import
 ```
 
-## Checks
+## Pages
 
-```bash
+| Page         | What it does                                    | Database features                 |
+| ------------ | ----------------------------------------------- | --------------------------------- |
+| For you      | suggests products and names who led to them     | traversal, similarity             |
+| Products     | filters that follow the products found          | attribute pattern, `$facet`       |
+| Product page | shows who you know that bought it               | `FOLLOWS` 1..2 steps              |
+| Cart         | checks shared cards and plans delivery          | transaction or step-by-step save  |
+| Orders       | keeps the price paid                            | embedded order items              |
+| People       | suggestions, network, shortest chain, referrals | `SHORTEST`, variable length paths |
+| Fraud review | accounts sharing cards, devices or addresses    | shared nodes, cycles              |
+| Delivery     | fastest, shortest and fewest-stop routes        | weighted paths                    |
+| Sales        | revenue and customers                           | aggregation pipelines             |
+| Comparisons  | 17 questions answered by each database          | query plans, result checks        |
+
+**How this works** beside a feature shows the old approach, the new one and the queries that ran.
+For the classes, see [class 1](docs/LECTURE-1.md), [class 2](docs/LECTURE-2.md),
+[old and new queries](docs/SQL-BEFORE-AFTER.md) and the [data model](docs/DATA-MODEL.md).
+
+## What the measurements show
+
+Medium dataset, one computer, one user at a time.
+
+- Neo4j is much faster for deep connections: a shortest path of up to five steps took 1.8 ms against
+  261 ms in MySQL.
+- MySQL is faster for one or two steps, small route networks and large reports.
+- MongoDB was not faster than MySQL for any read. Its gains here are flexible product fields, one
+  document per order, transactions and change streams.
+- The right index made both MySQL and MongoDB about 40 times faster.
+
+## Layout and checks
+
+```
+app/           pages and components (interface rules: docs/UI-RULES.md)
+server/        API routes, feature modules, database clients
+shared/        types used by both
+scripts/       check, import, export, seed, benchmark
+database/      importable data for all three databases
+```
+
+```powershell
 bun test tests
 bun run typecheck
 bun run examples     # old SQL and new Cypher return the same ids
 bun run format
 ```
 
-## Good to know
-
-- Orders, reviews and follows made in the app go to MongoDB and Neo4j only. The lab then reports
-  "results differ" against MySQL. `bun run seed` resets all three.
-- There is no login: the shopper picker in the sidebar chooses who you are.
+There is no login. "Shopping as" in the sidebar chooses the user.
